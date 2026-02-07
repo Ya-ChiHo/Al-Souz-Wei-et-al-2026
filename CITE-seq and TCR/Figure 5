@@ -1,0 +1,398 @@
+library(scRepertoire)
+library(Seurat)
+library(dplyr)
+library(ggplot2)
+library(patchwork)
+library(stringr)
+library(immunarch)
+library(circlize)
+library(scales)
+
+#Figure 5A-F - Upstream file processing, QC, and normalization
+seurat_Kidney = CreateSeuratObject(counts = data$`Gene Expression`)
+rownames(data$`Antibody Capture`) <- gsub('_', '-', rownames(data$`Antibody Capture`))
+seurat_Kidney[['Protein']] = CreateAssayObject(counts = data$`Antibody Capture`)
+
+seurat_Kidney <- NormalizeData(seurat_Kidney, assay = "Protein", normalization.method = "CLR")
+seurat_Kidney <- HTODemux(seurat_Kidney, assay = "Protein", positive.quantile = 0.999999999999999)
+
+HTOHeatmap(seurat_Kidney, assay = "Protein")
+
+#Demultiplexing
+seurat_Kidney.Kidney <- subset(seurat_Kidney, idents = "CD45-MHCI-TotalSeqC1")
+Idents(object = seurat_Kidney.Kidney) <- "Kidney"
+seurat_Kidney.Kidney@meta.data$orig.ident <- "Kidney"
+seurat_Kidney.Spleen <- subset(seurat_Kidney, idents = "CD45-MHCI-TotalSeqC2")
+Idents(object = seurat_Kidney.Spleen) <- "Spleen"
+seurat_Kidney.Spleen@meta.data$orig.ident <- "Spleen"
+seurat_Kidney.rLN <- subset(seurat_Kidney, idents = "CD45-MHCI-TotalSeqC3")
+Idents(object = seurat_Kidney.rLN) <- "rLN"
+seurat_Kidney.rLN@meta.data$orig.ident <- "rLN"
+
+seurat_singlet <- merge(seurat_Kidney.Kidney, y = c(seurat_Kidney.Spleen, seurat_Kidney.rLN),
+                        project = "all")
+
+seurat_singlet[["percent.mt"]] <- PercentageFeatureSet(seurat_singlet, pattern = "^mt-")
+
+VlnPlot(seurat_singlet, features = c("nFeature_RNA", "nCount_RNA", "percent.mt"), pt.size = 0.1, ncol = 3)
+seurat_singlet <- subset(seurat_singlet, subset = nFeature_RNA > 800 & nFeature_RNA < 4000 & percent.mt < 5)
+
+
+seurat_singlet <- NormalizeData(seurat_singlet, normalization.method = "LogNormalize", scale.factor = 10000)
+seurat_singlet <- FindVariableFeatures(seurat_singlet, selection.method = "vst", nfeatures = 2000)
+seurat_singlet.all.genes <- rownames(x = seurat_singlet)
+seurat_singlet <- ScaleData(object = seurat_singlet, features = seurat_singlet.all.genes)
+seurat_singlet <- RunPCA(object = seurat_singlet, pc.genes = seurat_singlet@var.genes, do.print = TRUE, pcs.print = 1:5, genes.print = 5)
+seurat_singlet <- FindNeighbors(seurat_singlet, dims = 1:15)
+seurat_singlet <- FindClusters(seurat_singlet, resolution = 1)
+seurat_singlet <- RunUMAP(seurat_singlet, dims = 1:15)
+
+
+#Figure 5A - Clustering by gene expression and tissue identity
+DimPlot(seurat_singlet, reduction = "umap", pt.size = 1.5, label = T)
+DimPlot(seurat_singlet, reduction = "umap", group.by = "orig.ident", pt.size = 1.5)
+
+#Figure 5A - Calculation of stemness score module
+data("seurat_singlet")
+
+cd_features <- list(c(
+  'Tcf7',
+  'Lef1',
+  'Ccr7',
+  'Il7r',
+  'Bach2',
+  'Slamf6'
+))
+
+seurat_singlet <- AddModuleScore(
+  object = seurat_singlet,
+  features = cd_features,
+  ctrl = 5,
+  name = 'CD_Features'
+)
+
+FeaturePlot(seurat_singlet, features = 'CD_Features1', pt.size = 1.5, cols = c("blue", "orange"))
+
+#Kidney subsets only
+kidney_subset <- c("2", "6", "7", "8", "9")
+
+seurat_subset <- subset(seurat_singlet, idents = kidney_subset)
+
+seurat_subset <- AddModuleScore(
+  object = seurat_subset,
+  features = cd_features,
+  ctrl = 5,
+  name = 'CD_Features'
+)
+
+FeaturePlot(seurat_subset, features = 'CD_Features1', pt.size = 1.5, cols = c("blue", "orange"))
+
+
+#Figure 5B - Gene expression of cluster-defining markers
+dotplot_genes <- c('Tcf7', 'Lef1', 'Ccr7', 'Il7r', 'Bach2', 'Cxcr6','Tox', 'Gzmb', 'Pdcd1', 'Havcr2', 'Ifngr1', 'Il21r', 'Xcl1')
+dotplot <- DotPlot(seurat_subset, features = dotplot_genes, group.by = 'seurat_clusters', dot.scale = 12)
+dotplot
+
+
+#Figure 5C-F - TCR file processing and combination
+contig.list <- createHTOContigList(contigs, seurat_singlet, group.by = "Protein_maxID")
+
+head(contig.list[[1]])
+
+combined <- combineTCR(contig.list, samples = c("Kidney", "Spleen", "rLN"))
+combined[["Kidney"]][["barcode"]] <- gsub ("Kidney_", "", combined[["Kidney"]][["barcode"]])
+combined[["Spleen"]][["barcode"]] <- gsub ("Spleen_", "", combined[["Spleen"]][["barcode"]])
+combined[["rLN"]][["barcode"]] <- gsub ("rLN_", "", combined[["rLN"]][["barcode"]])
+
+seurat <- combineExpression(combined, seurat_singlet, 
+                            cloneCall="gene", 
+                            group.by = "sample",
+                            proportion = TRUE)
+                            #cloneTypes=c(Single=1, Small=5, Medium=20, Large=100, Hyperexpanded=500))
+
+
+#Figure 5C - Clonal expansion by tissue
+clonalCompare(
+  combined,
+  top.clones = 10,
+  samples = c("rLN", "Spleen", "Kidney"),
+  cloneCall = "aa",
+  graph = "alluvial"
+)
+
+#Figure 5D - Chord diagram
+circles <- getCirclize(seurat, 
+                       group.by = "ident")
+grid.cols <- scales::hue_pal()(length(unique(seurat@active.ident)))
+names(grid.cols) <- levels(seurat@active.ident)
+
+circlize::chordDiagram(circles, directional =2, 
+                       self.link = 2, 
+                       grid.col = grid.cols)
+
+
+Figure 5E - Morisita-Horn index
+moris <- clonalOverlap(seurat,
+              cloneCall = "CTaa",
+              method = "morisita"
+              )
+moris
+
+
+#Figure 5F - Violin plots of select genes
+seurat <- combineExpression(
+  combined,
+  seurat_singlet,
+  cloneCall = "gene",
+  group.by = "sample",
+  proportion = F,
+  cloneSize = c(Single = 1, Small = 5, Medium = 20, Large = 100, Hyperexpanded = 500)
+)
+
+Idents(seurat) <- "cloneSize"
+
+VlnPlot(seurat, features = "Tox")
+VlnPlot(seurat, features = "Gzmb")
+VlnPlot(seurat, features = "Pdcd1")
+VlnPlot(seurat, features = "Havcr2")
+VlnPlot(seurat, features = "Lag3")
+VlnPlot(seurat, features = "Tigit")
+
+
+#Figure 5J-P - Upstream file processing, QC, and normalization
+X contigs <- read.csv("filtered_contig_annotations.csv")
+
+data_JA43 <- Read10X(data.dir = "C:/Users/Jafar/Desktop/Chord/CD8-eGFP/JA_43")
+data_JA44 <- Read10X(data.dir = "C:/Users/Jafar/Desktop/Chord/CD8-eGFP/JA_44")
+
+seurat_JA43 = CreateSeuratObject(counts = data_JA43$`Gene Expression`)
+seurat_JA44 = CreateSeuratObject(counts = data_JA44$`Gene Expression`)
+
+seurat_JA_all <- merge(seurat_JA43, y = c(seurat_JA44), add.cell.ids = c("JA43", "JA44"))
+
+seurat_JA43[['Protein']] = CreateAssayObject(counts = data_JA43$`Antibody Capture`)
+seurat_JA44[['Protein']] = CreateAssayObject(counts = data_JA44$`Antibody Capture`)
+
+seurat_JA43 <- subset(seurat_JA43, nFeature_RNA > 200) 
+seurat_JA43 <- NormalizeData(seurat_JA43)
+seurat_JA43 <- FindVariableFeatures(seurat_JA43)
+seurat_JA43 <- ScaleData(seurat_JA43)
+seurat_JA43 <- RunPCA(seurat_JA43, features = VariableFeatures(seurat_JA43))
+seurat_JA43 <- FindNeighbors(seurat_JA43, dims = 1:10)  # Adjust dimensions as necessary
+seurat_JA43 <- FindClusters(seurat_JA43, resolution = 0.5)  # Adjust resolution if needed
+
+
+seurat_JA44 <- subset(seurat_JA44, nFeature_RNA > 200)  
+seurat_JA44 <- NormalizeData(seurat_JA44)
+seurat_JA44 <- FindVariableFeatures(seurat_JA44)
+seurat_JA44 <- ScaleData(seurat_JA44)
+seurat_JA44 <- RunPCA(seurat_JA44, features = VariableFeatures(seurat_JA44))
+seurat_JA44 <- FindNeighbors(seurat_JA44, dims = 1:10)  # Adjust dimensions as necessary
+seurat_JA44 <- FindClusters(seurat_JA44, resolution = 0.5)  # Adjust resolution if needed
+
+
+seurat_JA43 <- NormalizeData(seurat_JA43, assay = "Protein", normalization.method = "CLR")
+seurat_JA44 <- NormalizeData(seurat_JA44, assay = "Protein", normalization.method = "CLR")
+seurat_JA43 <- HTODemux(seurat_JA43, assay = "Protein", positive.quantile = 0.99)
+seurat_JA44 <- HTODemux(seurat_JA44, assay = "Protein", positive.quantile = 0.99)
+negative/ambiguous cells.
+table(seurat_JA43$hash.ID)
+table(seurat_JA44$hash.ID)
+
+
+HTOHeatmap(seurat_JA43, assay = "Protein")
+HTOHeatmap(seurat_JA44, assay = "Protein")
+
+#Allocating eGFP positive or negative
+seurat_JA43@meta.data$orig.ident.JA <- "JA43.N.neg"
+seurat_JA44@meta.data$orig.ident.JA <- "JA44.N.pos"
+
+#Demultiplexing
+seurat_JA43.Spleen <- subset(seurat_JA43, idents = "CD45-MHCI-TotalSeqC-1")  
+Idents(object = seurat_JA43.Spleen) <- "Spleen"
+seurat_JA43.Spleen@meta.data$orig.ident <- "Spleen"
+seurat_JA43.Kidney <- subset(seurat_JA43, idents = "CD45-MHCI-TotalSeqC-2")
+Idents(object = seurat_JA43.Kidney) <- "Kidney"
+seurat_JA43.Kidney@meta.data$orig.ident <- "Kidney"
+seurat_JA43.rLN <- subset(seurat_JA43, idents = "CD45-MHCI-TotalSeqC-3")
+Idents(object = seurat_JA43.rLN) <- "rLN"
+seurat_JA43.rLN@meta.data$orig.ident <- "rLN"
+
+seurat_JA44.Spleen <- subset(seurat_JA44, idents = "CD45-MHCI-TotalSeqC-1")  
+Idents(object = seurat_JA44.Spleen) <- "Spleen"
+seurat_JA44.Spleen@meta.data$orig.ident <- "Spleen"
+seurat_JA44.Kidney <- subset(seurat_JA44, idents = "CD45-MHCI-TotalSeqC-2")
+Idents(object = seurat_JA44.Kidney) <- "Kidney"
+seurat_JA44.Kidney@meta.data$orig.ident <- "Kidney"
+seurat_JA44.rLN <- subset(seurat_JA44, idents = "CD45-MHCI-TotalSeqC-3")
+Idents(object = seurat_JA44.rLN) <- "rLN"
+seurat_JA44.rLN@meta.data$orig.ident <- "rLN"
+
+seurat_singlet_JA43 <- merge(seurat_JA43.Kidney, y = c(seurat_JA43.Spleen, seurat_JA43.rLN),project = "all")
+seurat_singlet_JA44 <- merge(seurat_JA44.Kidney, y = c(seurat_JA44.Spleen, seurat_JA44.rLN),project = "all")
+
+seurat_singlet_JA43 <- JoinLayers(seurat_singlet_JA43)
+seurat_singlet_JA44 <- JoinLayers(seurat_singlet_JA44)
+
+seurat_JA_all <- merge(seurat_singlet_JA43, y = c(seurat_singlet_JA44), add.cell.ids = c("JA43", "JA44"), 
+                    project = "seurat_CD8")
+
+seurat_CD8 <- merge(seurat_singlet_JA43, y = c(seurat_singlet_JA44), add.cell.ids = c("JA43", "JA44"), 
+                    project = "seurat_CD8")
+
+seurat_CD8[['RNA']]
+seurat_CD8[['Protein']]
+
+seurat_CD8[["percent.mt"]] <- PercentageFeatureSet(seurat_CD8, pattern = "^mt-")
+VlnPlot(seurat_CD8, features = c("nFeature_RNA", "nCount_RNA", "percent.mt"),ncol = 3)
+seurat_CD8 <- subset(seurat_CD8, subset = nFeature_RNA > 800 & nFeature_RNA < 4000 & percent.mt < 3)
+
+seurat_CD8 <- NormalizeData(seurat_CD8)
+seurat_CD8 <- FindVariableFeatures(seurat_CD8)
+seurat_CD8 <- ScaleData(seurat_CD8)
+seurat_CD8 <- RunPCA(seurat_CD8)
+seurat_CD8 <- FindNeighbors(seurat_CD8, dims = 1:20, reduction = "pca")
+seurat_CD8 <- FindClusters(seurat_CD8, resolution = 1, cluster.name = "unintegrated_clusters")
+
+seurat_CD8  <- RunUMAP(seurat_CD8 , dims = 1:20, reduction = "pca", reduction.name = "umap.unintegrated")
+
+#DimPlot(seurat_CD8 , reduction = "umap.unintegrated", group.by = c("orig.ident", "orig.ident.JA", "seurat_clusters"))
+
+#Figure 5J - Clustering by gene expression, eGFP-expression, and tissue identity
+#DimPlot(seurat_CD8 , reduction = "umap.unintegrated", group.by = "orig.ident")
+#DimPlot(seurat_CD8 , reduction = "umap.unintegrated", group.by = "orig.ident.JA")
+#DimPlot(seurat_CD8 , reduction = "umap.unintegrated", group.by ="seurat_clusters")
+
+seurat_CD8 <- IntegrateLayers(object = seurat_CD8, method = CCAIntegration, orig.reduction = "pca", new.reduction = "integrated.cca",
+                              verbose = FALSE)
+
+seurat_CD8[["RNA"]] <- JoinLayers(seurat_CD8[["RNA"]])
+
+seurat_CD8 <- FindNeighbors(seurat_CD8, dims = 1:15, reduction = "integrated.cca")
+seurat_CD8 <- FindClusters(seurat_CD8, resolution = 0.5)
+
+seurat_CD8  <- RunUMAP(seurat_CD8 , dims = 1:15, reduction = "integrated.cca")
+
+#Figure 5J - Clustering by gene expression, eGFP-expression, and tissue identity
+DimPlot(seurat_CD8 , reduction = "umap", group.by = "orig.ident.JA")
+DimPlot(seurat_CD8 , reduction = "umap", group.by = "seurat_clusters", pt.size = 1)
+DimPlot(seurat_CD8 , reduction = "umap", group.by = "orig.ident", pt.size = 1)
+
+DimPlot(seurat_CD8, reduction = "umap", group.by = "orig.ident.JA", 
+        cols = c("gray", "green"), pt.size = 1)
+
+
+#Figure 5K - eGFP expressing cells by cluster
+meta <- seurat_CD8@meta.data
+
+meta <- meta %>%
+  select(orig.ident.JA, seurat_clusters)
+
+cluster_summary <- meta %>%
+  group_by(seurat_clusters, orig.ident.JA) %>%
+  summarise(n = n(), .groups = "drop") %>%
+  group_by(seurat_clusters) %>%
+  mutate(total = sum(n),
+         percent = n / total * 100)
+
+pos_summary <- cluster_summary %>%
+  filter(orig.ident.JA == "JA44.N.Pos")
+
+ggplot(pos_summary, aes(x = seurat_clusters, y = percent, fill = orig.ident.JA)) +
+  geom_bar(stat = "identity", width = 0.7) +
+  scale_fill_manual(values = c("green")) +
+  labs(x = "Cluster", y = "Percent JA44.N.Pos Cells",
+       title = "JA44.N.Pos Cells per Cluster") +
+  theme_minimal() +
+  theme(legend.position = "none")
+
+ggplot(cluster_summary, aes(x = seurat_clusters, y = percent, fill = orig.ident.JA)) +
+  geom_bar(stat = "identity", position = "fill") +  # 'fill' stacks to 100%
+  scale_fill_manual(values = c("gray", "green")) +
+  labs(x = "Cluster", y = "Fraction of Cells",
+       title = "Population Composition per Cluster") +
+  theme_minimal()
+
+
+#Figure 5L - Gene expression of cluster-defining markers
+seurat_singlet.allmarkers <- FindAllMarkers(seurat_CD8)
+seurat_singlet.allmarkers %>% group_by(cluster) %>% top_n(n = 2, wt = avg_log2FC)
+dotplot_genes <- c('Tcf7', 'Sell', 'Ccr7', 'Il7r', 'Tox', 'Cxcr6', 'Pdcd1', 'Havcr2', 'Lag3', 'Tigit', 'Ctla4', 'Gzmb', 'Gzmk', 'Ifng', 'Mki67')
+dotplot <- DotPlot(seurat_CD8, features = dotplot_genes, group.by = 'seurat_clusters', dot.scale = 12)
+dotplot
+
+
+###TCR analysis
+#Figure 5M-P - TCR file processing and combination
+contigs.43 <- read.csv("filtered_contig_annotations_JA43.csv")
+contigs.44 <- read.csv("filtered_contig_annotations_JA44.csv")
+
+contig.list.43 <- createHTOContigList(contigs.43, seurat_singlet_JA43, group.by = "Protein_maxID")
+contig.list.44 <- createHTOContigList(contigs.44, seurat_singlet_JA44, group.by = "Protein_maxID")
+
+contig_Kidney_N.neg <- read.csv("filtered_contig_annotations_JA43_Kidney.csv")
+contig_Spleen_N.neg <- read.csv("filtered_contig_annotations_JA43_Spleen.csv")
+contig_rLN_N.neg <- read.csv("filtered_contig_annotations_JA43_rLN.csv")
+contig_Kidney_N.pos <- read.csv("filtered_contig_annotations_JA44_Kidney.csv")
+contig_Spleen_N.pos <- read.csv("filtered_contig_annotations_JA44_Spleen.csv")
+contig_rLN_N.pos <- read.csv("filtered_contig_annotations_JA44_rLN.csv")
+
+contig_list <- list(contig_Kidney_N.neg, contig_Kidney_N.pos,
+                    contig_Spleen_N.neg, contig_Spleen_N.pos,
+                    contig_rLN_N.neg, contig_rLN_N.pos)
+
+combined <- combineTCR(contig_list, 
+                       samples = c("Kidney.N.neg", "Kidney.N.pos","Spleen.N.neg", "Spleen.N.pos","rLN.N.neg","rLN.N.pos"))
+
+Figure 5M - Clonal expansion by tissue and eGFP expression
+clonalHomeostasis(combined, cloneCall = "gene", 
+                  cloneTypes = c(Rare = 1e-04, 
+                                 Small = 0.001, 
+                                 Medium = 0.01, 
+                                 Large = 0.1, 
+                                 Hyperexpanded = 1))
+
+
+clonalHomeostasis(combined, cloneCall = "aa")
+
+plot <- clonalHomeostasis(combined, cloneCall = "aa")
+plot <- plot + scale_x_discrete(limits = c("rLN.N.neg", "rLN.N.pos", "Spleen.N.neg", "Spleen.N.pos", "Kidney.N.neg", "Kidney.N.pos"))
+print(plot)
+
+#Figure 5N - Morisita-Horn index
+clonalOverlap(combined, 
+              cloneCall = "CTaa", 
+              method = "morisita")
+
+#Figure 5O-P - Violin plots of select genes
+seurat_JA43_filtered <- subset(seurat_JA43, subset = hash.ID %in% c("CD45-MHCI-TotalSeqC-1", "CD45-MHCI-TotalSeqC-2", "CD45-MHCI-TotalSeqC-3"))
+
+seurat_JA43_filtered$hash.ID <- factor(seurat_JA43_filtered$hash.ID, 
+                                       levels = c("CD45-MHCI-TotalSeqC-3", "CD45-MHCI-TotalSeqC-1", "CD45-MHCI-TotalSeqC-2"))
+
+p <- VlnPlot(seurat_JA43_filtered, features = "Nr4a1", group.by = "hash.ID", cols = custom_colors)
+p <- VlnPlot(seurat_JA43_filtered, features = "Tcf7", group.by = "hash.ID", cols = custom_colors)
+p <- VlnPlot(seurat_JA43_filtered, features = "Ccr7", group.by = "hash.ID", cols = custom_colors)
+p <- VlnPlot(seurat_JA43_filtered, features = "Il7r", group.by = "hash.ID", cols = custom_colors)
+p <- VlnPlot(seurat_JA43_filtered, features = "Prdm1", group.by = "hash.ID", cols = custom_colors)
+p <- VlnPlot(seurat_JA43_filtered, features = "Gzmb", group.by = "hash.ID", cols = custom_colors)
+p <- VlnPlot(seurat_JA43_filtered, features = "Pdcd1", group.by = "hash.ID", cols = custom_colors)
+p <- VlnPlot(seurat_JA43_filtered, features = "Havcr2", group.by = "hash.ID", cols = custom_colors)
+
+
+seurat_JA44_filtered <- subset(seurat_JA44, subset = hash.ID %in% c("CD45-MHCI-TotalSeqC-1", "CD45-MHCI-TotalSeqC-2", "CD45-MHCI-TotalSeqC-3"))
+
+
+seurat_JA44_filtered$hash.ID <- factor(seurat_JA44_filtered$hash.ID, 
+                                       levels = c("CD45-MHCI-TotalSeqC-3", "CD45-MHCI-TotalSeqC-1", "CD45-MHCI-TotalSeqC-2"))
+
+p <- VlnPlot(seurat_JA43_filtered, features = "Nr4a1", group.by = "hash.ID", cols = custom_colors)
+p <- VlnPlot(seurat_JA43_filtered, features = "Tcf7", group.by = "hash.ID", cols = custom_colors)
+p <- VlnPlot(seurat_JA43_filtered, features = "Ccr7", group.by = "hash.ID", cols = custom_colors)
+p <- VlnPlot(seurat_JA43_filtered, features = "Il7r", group.by = "hash.ID", cols = custom_colors)
+p <- VlnPlot(seurat_JA43_filtered, features = "Prdm1", group.by = "hash.ID", cols = custom_colors)
+p <- VlnPlot(seurat_JA43_filtered, features = "Gzmb", group.by = "hash.ID", cols = custom_colors)
+p <- VlnPlot(seurat_JA43_filtered, features = "Pdcd1", group.by = "hash.ID", cols = custom_colors)
+p <- VlnPlot(seurat_JA43_filtered, features = "Havcr2", group.by = "hash.ID", cols = custom_colors)
+
+p <- VlnPlot(seurat_JA44_filtered, features = "Tcf7", group.by = "hash.ID", cols = custom_colors)
