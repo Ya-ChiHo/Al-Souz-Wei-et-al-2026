@@ -1,0 +1,122 @@
+
+library(rcna)
+
+
+#Figure 7J - CNA correlation plot
+run_CNA_and_output_results <- function(seurat_obj, clinical_metadata_df, metadata_colname, metadata_colname_for_fig_title, metadata_colname_for_filename, 
+									   PCs_to_use, covariates_to_use, output_dir) {
+
+	CNA_output_dir = paste0(output_dir, '/', metadata_colname_for_filename, '/')
+	if (!file.exists(CNA_output_dir)) {
+		dir.create(CNA_output_dir, recursive = TRUE)
+	}
+	
+	if (!is.null(covariates_to_use)) {
+		
+		cells_with_non_NA_vals_ind = 1:ncol(seurat_obj)
+
+		# We'll add each metadata variable to the seurat object:
+		for (curr_var in covariates_to_use) {
+		
+			var_val_per_cell = clinical_metadata_df[seurat_obj@meta.data$Sample, curr_var]
+			
+			seurat_obj <- AddMetaData(seurat_obj, var_val_per_cell, curr_var)
+			
+			# identify cells with non-NA values; these are the ones we'll keep
+			cells_with_non_NA_vals_for_curr_val_ind = which(!is.na(var_val_per_cell))
+			cells_with_non_NA_vals_ind = intersect(cells_with_non_NA_vals_ind, cells_with_non_NA_vals_for_curr_val_ind)
+		}
+		
+		cells_with_non_NA_vals = colnames(seurat_obj)[cells_with_non_NA_vals_ind]
+		seurat_obj = subset(seurat_obj, cells = cells_with_non_NA_vals)
+		
+	}
+	
+	seurat_obj <- FindNeighbors(seurat_obj, dims = PCs_to_use, reduction = 'harmony')
+	
+	seurat_obj <- association.Seurat(seurat_object = seurat_obj, test_var = metadata_colname, samplem_key = 'Sample', graph_use = 'RNA_nn', 
+									 verbose = TRUE,
+									 batches = NULL, ## no batch variables to include
+									 covs = covariates_to_use ## Specify NULL for no covariates to include 
+									)
+	
+	global_p_value = seurat_obj@reductions[['cna']]@misc$p
+	
+	interval <- c(-max(abs(seurat_obj@meta.data$cna_ncorrs)), max(abs(seurat_obj@meta.data$cna_ncorrs)))
+	myPalette <- colorRampPalette(c(RColorBrewer::brewer.pal(11, "RdBu")[11:7], "#DCDCDC", RColorBrewer::brewer.pal(11, "RdBu")[5:1]))
+	
+	# Show the correlations: 
+	fig_file_name = paste0(CNA_output_dir, '/CNA_corrs.png')
+	png(fig_file_name, type = 'cairo')
+	p <- FeaturePlot(seurat_obj, features = c('cna_ncorrs')) + 
+		 scale_color_gradientn(na.value="lightgray",colors = myPalette(100), limits = interval, name = "Correlation")
+    p <- p + labs(title = sprintf('%s', metadata_colname_for_fig_title), color = 'Correlation',
+				  subtitle = sprintf('global p=%0.3f', global_p_value), x = 'UMAP 1', y = 'UMAP 2')
+	p <- p + theme(axis.title.x = element_text(face="bold", size=20), axis.title.y = element_text(face="bold", size=20), 
+		           axis.text.x = element_text(face="bold", size = 16), axis.text.y = element_text(face="bold", size = 16), 
+		           plot.title = element_text(face="bold", size=22, hjust = 0.5), plot.subtitle = element_text(face="bold", size=16, hjust = 0.5), 
+			       legend.position = "right", legend.title = element_text(face="bold", size = 18), legend.text = element_text(face="bold", size = 16))
+    print(p)
+	
+	dev.off()
+	
+	# Color only correlations that are significant with an FDR < 0.1: 
+	fig_file_name = paste0(CNA_output_dir, '/CNA_corrs.FDR_le_0.1.for_manuscript.png')
+	png(fig_file_name, type = 'cairo')
+	p <- FeaturePlot(seurat_obj, features = c('cna_ncorrs_fdr10')) + 
+		 scale_color_gradientn(na.value="lightgray",colors = myPalette(100), limits = interval, name = "Correlation")		 
+    p <- p + labs(title = '', color = 'Correlation',
+				  subtitle = sprintf('global p=%0.3f', global_p_value), x = 'UMAP 1', y = 'UMAP 2')
+	p <- p + theme(axis.title.x = element_text(face="bold", size=20), axis.title.y = element_text(face="bold", size=20), 
+		           axis.text.x = element_blank(), axis.text.y = element_blank(), 
+		           plot.subtitle = element_text(face="bold", size=16, hjust = 0.5), 
+			       legend.position = "right", legend.title = element_text(face="bold", size = 16), legend.text = element_text(face="bold", size = 14), 
+				   axis.ticks = element_blank())
+    print(p)
+
+	dev.off()
+
+	
+}
+
+
+if (!file.exists(output_dir)) {
+	dir.create(output_dir, recursive = TRUE)
+}
+
+
+studied_cells = readRDS(seurat_obj_file)
+clinical_metadata_df = read.table(clinical_metadata_file, header=TRUE, row.names=1, sep = "\t", as.is = TRUE)
+
+samples_to_use_ind = which(clinical_metadata_df$Type == 'LN')
+samples_to_use = rownames(clinical_metadata_df)[samples_to_use_ind]
+clinical_metadata_df = clinical_metadata_df[samples_to_use, ]
+
+
+samples_with_non_na_val_ind = which(!is.na(clinical_metadata_df[, var_to_check]))
+samples_with_non_na_val = rownames(clinical_metadata_df)[samples_with_non_na_val_ind]
+samples_to_use_for_var_to_check = samples_with_non_na_val
+		
+cells_of_samples_to_use_ind = which(studied_cells@meta.data$Sample %in% samples_to_use_for_var_to_check)
+cells_of_samples_to_use = colnames(studied_cells)[cells_of_samples_to_use_ind]
+studied_cells = subset(studied_cells, cells = cells_of_samples_to_use)
+	
+var_val_per_cell = clinical_metadata_df[studied_cells@meta.data$Sample, var_to_check]
+if (var_to_check_type == 'numeric') {
+
+	var_val_per_cell = as.numeric(var_val_per_cell)
+	
+} else if (var_to_check_type == 'char') {
+
+	var_val_per_cell = factor(var_val_per_cell, levels = vals_to_include_vec)  # so that the order is as specified in vars_to_check_df
+	var_val_per_cell = as.numeric(var_val_per_cell)
+	
+}
+
+studied_cells[[var_to_check]] = var_val_per_cell
+run_CNA_and_output_results(studied_cells, clinical_metadata_df, var_to_check, var_to_check_label, var_to_check_filename_label, PCs_to_use, covariates_to_use, 
+						   output_dir)
+	
+	
+
+
