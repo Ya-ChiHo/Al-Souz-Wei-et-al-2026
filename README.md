@@ -8,6 +8,7 @@ Scripts are located in 3 separate directories, depending on the type of single-c
 
 'Mouse CITE-seq and TCR' and 'Human RNA-seq' directories contain functional scripts to generate the corresponding figures in the manuscript. 
 
+
 In 'Mouse_Multiome":
 
 The two 'preprocessing.R' files describe example steps taken to process Cellranger data to generate Seurat objects: Building and merging ATAC, RNA, and CITE Seurat objects, recall peaks by MACS2, doublet removal, low quality cell filter, 
@@ -24,6 +25,7 @@ build cell cell communication.R - minimal example scripts to build required R ob
 build monocle2 trajectory.R - minimal example scripts to build required R objects for pseudotime trajectory analysis (by Monocle3).
 
 In 'Mouse_Multiome', scripts in the 'Figure #.R' require processed Seurat objects generated from the above (as described in script comment). 
+
 
 All 'Figure #.R' generate the plots as shown in manuscript main figures and, when relevant, the functions/data processing steps required to generate these plots. Scripts in 'Figures.R' may be modified to reproduce all supplemental figures. 
 
