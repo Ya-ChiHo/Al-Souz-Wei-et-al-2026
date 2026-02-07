@@ -1,0 +1,669 @@
+
+library(zoo)
+library(glmnet)
+
+#Figure S7A - Immune cells per sample
+LN_cells_ind = which(all_immune_cells@meta.data$Type == 'LN')
+LD_cells_ind = which(all_immune_cells@meta.data$Type == 'Control')
+
+# Show the number of immune cells per sample: 
+num_cells_per_sample.LN = summary(as.factor(all_immune_cells@meta.data$Sample[LN_cells_ind]), maxsum = Inf)
+num_cells_per_sample.LD = summary(as.factor(all_immune_cells@meta.data$Sample[LD_cells_ind]), maxsum = Inf)
+
+df_to_show = data.frame(type = c(rep('LN', length(num_cells_per_sample.LN)), rep('Healthy', length(num_cells_per_sample.LD))), 
+						num_cells = c(num_cells_per_sample.LN, num_cells_per_sample.LD))
+						
+df_to_show$type = factor(df_to_show$type, levels = c('LN', 'Healthy'))
+						
+fig_subtitle = sprintf('avg for LN patients: %0.1f\navg for healthy controls: %0.1f', mean(num_cells_per_sample.LN), mean(num_cells_per_sample.LD))
+						
+fig_file_name = paste0(output_dir, '/num_immune_cells_per_patient.LN_vs_LD.png')
+png(fig_file_name, type = 'cairo', height = 360, width = 300)
+p <- ggplot(df_to_show, aes(x = type, y = num_cells)) + 
+			 geom_boxplot(fill = 'steelblue') + theme_classic()
+p <- p + labs(y = '# Immune Cells', title = '# Immune Cells\nPer Sample', subtitle = fig_subtitle)
+p <- p + theme(axis.title.x = element_blank(), axis.text.x  = element_text(face = "bold", size=20)) + 
+		 theme(axis.title.y = element_text(face="bold", size=20), axis.text.y  = element_text(face = "bold", size=16)) + 
+		 theme(plot.title = element_text(face="bold", size=20, hjust = 0.5)) + 
+		 theme(plot.subtitle = element_text(face="bold", size=16, hjust = 0.5)) + 
+		 theme(legend.position = "none")
+print(p)
+dev.off()
+
+# Show the number of T cells per sample - not including NK cells (clusters T2, T11, and T24) and ILCs (cluster T17): 
+T_cell_clusters = c('T0', 'T1', 'T3', 'T4', 'T5', 'T6', 'T7', 'T8', 'T9', 'T10', 'T12', 'T13', 'T14', 'T15', 'T16', 'T18', 'T19', 'T20', 
+					'T21', 'T22', 'T23', 'T25')
+T_cells_ind = which(all_immune_cells@active.ident %in% T_cell_clusters)
+
+LN_T_cells_ind = intersect(LN_cells_ind, T_cells_ind)
+LD_T_cells_ind = intersect(LD_cells_ind, T_cells_ind)
+
+num_T_cells_per_sample.LN = summary(as.factor(all_immune_cells@meta.data$Sample[LN_T_cells_ind]), maxsum = Inf)
+num_T_cells_per_sample.LD = summary(as.factor(all_immune_cells@meta.data$Sample[LD_T_cells_ind]), maxsum = Inf)
+
+df_to_show = data.frame(type = c(rep('LN', length(num_T_cells_per_sample.LN)), rep('Healthy', length(num_T_cells_per_sample.LD))), 
+						num_cells = c(num_T_cells_per_sample.LN, num_T_cells_per_sample.LD))
+
+df_to_show$type = factor(df_to_show$type, levels = c('LN', 'Healthy'))
+
+fig_subtitle = sprintf('avg for LN patients: %0.1f\navg for healthy controls: %0.1f', mean(num_T_cells_per_sample.LN), mean(num_T_cells_per_sample.LD))
+						
+fig_file_name = paste0(output_dir, '/num_T_cells_per_patient.LN_vs_LD.png')
+png(fig_file_name, type = 'cairo', height = 360, width = 300)
+p <- ggplot(df_to_show, aes(x = type, y = num_cells)) + 
+			 geom_boxplot(fill = 'steelblue') + theme_classic()
+p <- p + labs(y = '# T Cells', title = '# T Cells\nPer Sample', subtitle = fig_subtitle)
+p <- p + theme(axis.title.x = element_blank(), axis.text.x  = element_text(face = "bold", size=20)) + 
+		 theme(axis.title.y = element_text(face="bold", size=20), axis.text.y  = element_text(face = "bold", size=16)) + 
+		 theme(plot.title = element_text(face="bold", size=20, hjust = 0.5)) + 
+		 theme(plot.subtitle = element_text(face="bold", size=16, hjust = 0.5)) + 
+		 theme(legend.position = "none")
+print(p)
+dev.off()
+
+
+#Figure S7F-I - Cell subsets and clinical correlation
+covariates_to_consider = c('Race', 'Ethnicity', 'Sex', 'Age', 'ISN', 'First_Biopsy', 'CS_ge30', 'MMF')
+
+ISN_class_to_include = 'all'
+#ISN_class_to_include = 'Proliferative+Mixed'
+#ISN_class_to_include = 'Membranous'
+
+
+base_output_dir = ''		# Set as required
+
+
+populate_list_of_cluster_frac_ratios_to_test <- function() {
+
+	cluster_frac_ratios_to_test = list()
+
+	# the fraction of CTLs (clusters T5 & T15) out of all CD8 T cells:
+	cluster_frac_ratio$label = 'CTLs out of CD8 T Cells'
+	cluster_frac_ratio$numerator = c('T5', 'T25')
+		# CTL clusters (low and high quality)
+	cluster_frac_ratio$denominator = c('T1', 'T4', 'T5', 'T6', 'T13', 'T15', 'T18', 'T25')
+		# CD8 T cells. Note that we're not including here gamma-delta T cells and NK cells. We also do not include the ISG-high cells (cluster T21), which are a mixture		
+		# of CD8 and CD4 T cells, but are mostly CD4 T cells; and we don't include T20 and T8, which seem to be more of a mixed CD4/CD8 stem-like T cells. 
+	cluster_frac_ratios_to_test[[length(cluster_frac_ratios_to_test)+1]] = cluster_frac_ratio
+	
+	# the fraction of TRMs (cluster T6) out of all CD8 T cells:
+	cluster_frac_ratio$label = 'TRMs out of CD8 T Cells'
+	cluster_frac_ratio$numerator = c('T6')
+	cluster_frac_ratio$denominator = c('T1', 'T4', 'T5', 'T6', 'T13', 'T15', 'T18', 'T25')
+	cluster_frac_ratios_to_test[[length(cluster_frac_ratios_to_test)+1]] = cluster_frac_ratio
+	
+	# the fraction of GZMK CD8 T cells (clusters T1, T4, T13, T18) out of all CD8 T cells:
+	cluster_frac_ratio$label = 'GZMK out of CD8 T Cells'
+	cluster_frac_ratio$numerator = c('T1', 'T4', 'T13', 'T18')
+	cluster_frac_ratio$denominator = c('T1', 'T4', 'T5', 'T6', 'T13', 'T15', 'T18', 'T25') 
+	cluster_frac_ratios_to_test[[length(cluster_frac_ratios_to_test)+1]] = cluster_frac_ratio
+	
+	
+	return(cluster_frac_ratios_to_test)
+}
+
+###################################################################################################################################################################
+
+get_info_of_cluster_frac_ratio <- function(cluster_frac_ratios_to_test, ratio_label) {
+
+	for (ratio_idx in 1:length(cluster_frac_ratios_to_test)) {
+
+		curr_ratio = cluster_frac_ratios_to_test[[ratio_idx]]
+		if (curr_ratio$label == ratio_label) {
+		
+			return(curr_ratio)
+		}
+
+	}
+	
+	print(sprintf('Warning - could not find details of ratio %s', ratio_label))
+	return(NULL)  # we'll only get here if an incorrect ratio label was given
+}
+
+###################################################################################################################################################################
+
+calculate_cluster_frac_ratio_per_sample <- function(ratio_info, studied_cells, min_num_cells_for_ratio_calculation, ratio_label, output_dir) {
+
+	cluster_frac_ratio_per_sample = c()
+	samples_with_computed_ratios = c()
+	sample_idx = 0
+	
+	# We'll do this only for the LN patients samples:
+	cells_of_LN_patients_ind = which(studied_cells@meta.data$Type == 'LN')
+	LN_samples = sort(unique(studied_cells@meta.data$Sample[cells_of_LN_patients_ind]))
+
+	for (curr_sample in LN_samples) {
+
+		cells_of_sample_in_numerator = which( (studied_cells@meta.data$Sample == curr_sample) & (studied_cells@active.ident %in% ratio_info$numerator) )
+		cells_of_sample_in_denominator = which( (studied_cells@meta.data$Sample == curr_sample) & (studied_cells@active.ident %in% ratio_info$denominator) )
+
+		if ( (length(cells_of_sample_in_denominator) >= min_num_cells_for_ratio_calculation) && (length(cells_of_sample_in_numerator) >= min_num_cells_for_ratio_calculation) ) {
+		
+			sample_idx = sample_idx + 1
+			cluster_frac_ratio_per_sample[sample_idx] = length(cells_of_sample_in_numerator) / length(cells_of_sample_in_denominator)
+			samples_with_computed_ratios[sample_idx] = curr_sample
+		
+		}
+
+	}
+	names(cluster_frac_ratio_per_sample) = samples_with_computed_ratios
+
+	# save for future use:
+	ratio_label_for_filename = str_replace_all(ratio_label, ' ', '_')
+	output_file = paste0(output_dir, '/', ratio_label_for_filename, '.min_num_cells_', min_num_cells_for_ratio_calculation, '.txt')
+	write.table(cluster_frac_ratio_per_sample, file = output_file, sep = "\t", quote = FALSE, col.names = FALSE, row.names = TRUE)
+
+	return(cluster_frac_ratio_per_sample)
+}
+
+###################################################################################################################################################################
+
+# Custom function to return moving window stats: 
+moving_window_stats <- function(x) {
+    # x     = numeric vector    
+
+	computed_quantiles <- quantile(x, c(0.25, 0.5, 0.75))    
+	avg = mean(x)
+	std_dev = sd(x)
+	
+    ret <- c(median = computed_quantiles[2], quartile1 = computed_quantiles[1], quartile3 = computed_quantiles[3], avg = avg, std_dev = std_dev) 
+    return(ret)
+}
+
+###################################################################################################################################################################
+
+calc_correlation_between_single_ratio_and_continuous_variable <- function(ratio_per_sample_to_use, ratio_label, label_for_fig_title, 
+																		  cont_var_vals_to_use, cont_var_label, cont_var_label_for_filename, 
+															              include_moving_window_stats, window_size, include_trend_line, include_num_samples_in_title, 
+																          x_ticks, y_ticks, comparison_dir) {
+																		  
+	if (include_moving_window_stats) {
+		
+		# first, sort the ratio values (y axis) by the values of the given contiuous variable (x axis):
+		sort_results <- sort.int(cont_var_vals_to_use, index.return = TRUE)
+		ratio_per_sample_to_use.sorted_by_cont_var <- ratio_per_sample_to_use[sort_results$ix]
+		cont_var_vals_to_use.sorted <- sort_results$x
+		window_stats <- rollapply(ratio_per_sample_to_use.sorted_by_cont_var, width = window_size, FUN = moving_window_stats, fill = NA, align = "center")
+		
+		window_substr = paste0('.with_moving_stats.win_size', window_size)
+		
+		df_to_show = data.frame(val = cont_var_vals_to_use.sorted, ratio = ratio_per_sample_to_use.sorted_by_cont_var, 
+								moving_median = window_stats[,1], moving_qrtl1 = window_stats[,2], moving_qrtl3 = window_stats[,3], 
+								moving_avg = window_stats[,4], moving_std_dev = window_stats[,5])
+		
+	} else if (include_trend_line) {
+	
+		window_substr = '.with_trend_line'
+		df_to_show = data.frame(val = cont_var_vals_to_use, ratio = ratio_per_sample_to_use)
+	
+	} else {
+		
+		window_substr = ''
+		df_to_show = data.frame(val = cont_var_vals_to_use, ratio = ratio_per_sample_to_use)
+	}
+
+	corr_result = cor.test(ratio_per_sample_to_use, cont_var_vals_to_use, method = 'spearman')
+	
+	if (corr_result$p.value < 0.001) {
+		
+		p_val_str = 'p-value < 0.001'
+		
+	} else {
+	
+		p_val_str = sprintf('p-value = %0.3f', corr_result$p.value)
+	
+	}
+	
+	if (include_num_samples_in_title) {
+	
+		fig_title = sprintf('%s\n\u03c1 = %0.3f (%s)\n(n = %d)', label_for_fig_title, corr_result$estimate, p_val_str, length(cont_var_vals_to_use))
+			# \u03c1 = the unicode value for lowercase rho
+	} else {
+	
+		fig_title = sprintf('%s\n\u03c1 = %0.3f (%s)', label_for_fig_title, corr_result$estimate, p_val_str)
+			# \u03c1 = the unicode value for lowercase rho
+	}
+
+	ratio_label_for_filename = str_replace_all(ratio_label, ' ', '_')
+
+	fig_file_name = paste0(comparison_dir, '/', cont_var_label_for_filename, '_vs_', ratio_label_for_filename, window_substr, '.for_manuscript.png')
+	png(fig_file_name, type = 'cairo')
+	p <- ggplot(df_to_show, aes(x = val, y = ratio)) + geom_point()
+	p <- p + theme_classic()
+	p <- p + labs(x = cont_var_label, y = 'Cluster Fraction Ratio', title = fig_title) 											
+	p <- p + theme(axis.title.x = element_text(face="bold", size=20), axis.text.x  = element_text(face = "bold", size=16)) + 
+			 theme(axis.title.y = element_text(face="bold", size=20), axis.text.y  = element_text(face = "bold", size=16)) + 
+			 theme(plot.title = element_text(face="bold", size=18, hjust = 0.5)) + 
+			 theme(legend.position = 'none') +
+			 scale_x_continuous(breaks=x_ticks) + scale_y_continuous(breaks=y_ticks)
+	p <- p + geom_smooth(method = "glm")
+	print(p)
+	dev.off()
+	
+	test_results = list(spearman_corr = corr_result$estimate, p_val = corr_result$p.value)
+	return(test_results)
+																	  																		  
+}
+
+###################################################################################################################################################################
+
+regress_continuous_variable_as_function_of_ratio_and_covariates <- function(ratio_per_sample_to_use, ratio_label, cont_var_vals_to_use, 
+																			cont_var_label, cont_var_label_for_filename, 
+																			clinical_meta_data, covariates_to_consider_for_test, 
+																			comparison_dir) {
+																			   
+	# We'll test each covariate separately: 
+
+	# First, we'll run regression for the ratio only. 
+	df_for_model = data.frame(cont_var = cont_var_vals_to_use, ratio = ratio_per_sample_to_use)
+	model_without_covariates = lm(cont_var ~ ratio, data = df_for_model)
+	model_summary = summary(model_without_covariates)
+	ratio_coeff_without_covariates = model_summary$coefficients['ratio','Estimate']
+	ratio_p_val_without_covariates = model_summary$coefficients['ratio','Pr(>|t|)']
+	
+	# Now, construct a model with a single covariate in each time. We'll record the results of these models:
+	models_with_single_covariates_data = list(covariate = c(), ratio_coeff = c(), ratio_p_val = c(), num_samples = c())
+	least_significant_ratio_p_val = 0
+	all_ratio_coeffs_have_same_sign = TRUE
+	
+	for (covariate_idx in 1:length(covariates_to_consider_for_test)) {
+	
+		curr_covariate = covariates_to_consider_for_test[covariate_idx]
+		
+		samples_with_covariate_vals_ind = which(!is.na(clinical_meta_data[, curr_covariate]))
+		samples_with_covariate_vals = rownames(clinical_meta_data)[samples_with_covariate_vals_ind]
+		samples_to_use_for_model = intersect(names(ratio_per_sample_to_use), samples_with_covariate_vals)
+		
+		covariate_vals_for_model = clinical_meta_data[samples_to_use_for_model, curr_covariate]
+	
+		if (length(unique(covariate_vals_for_model)) < 2) {
+		
+			print(sprintf('Warning - covariate %s has only one unique value - skipping', curr_covariate))
+			next
+		}
+		
+		ratio_for_model = ratio_per_sample_to_use[samples_to_use_for_model]
+		cont_var_vals_for_model = cont_var_vals_to_use[samples_to_use_for_model]
+		
+		# note that the lm function (which fits the model) can handle categorical variables, by automatically generating from them indicator (dummy) variables
+		df_for_model = data.frame(cont_var = cont_var_vals_for_model, covariate = covariate_vals_for_model, ratio = ratio_for_model)
+		model_with_curr_covariate = lm(cont_var ~ covariate + ratio, data = df_for_model)
+		model_summary = summary(model_with_curr_covariate)
+		ratio_coeff_for_curr_covariate = model_summary$coefficients['ratio','Estimate']
+		ratio_p_val_for_curr_covariate = model_summary$coefficients['ratio','Pr(>|t|)']
+	
+		models_with_single_covariates_data$covariate[covariate_idx] = curr_covariate
+		models_with_single_covariates_data$ratio_coeff[covariate_idx] = ratio_coeff_for_curr_covariate
+		models_with_single_covariates_data$ratio_p_val[covariate_idx] = ratio_p_val_for_curr_covariate
+		models_with_single_covariates_data$num_samples[covariate_idx] = length(samples_to_use_for_model)
+	
+		least_significant_ratio_p_val = max(least_significant_ratio_p_val, ratio_p_val_for_curr_covariate)
+		all_ratio_coeffs_have_same_sign = (all_ratio_coeffs_have_same_sign && (sign(ratio_coeff_for_curr_covariate) == sign(ratio_coeff_without_covariates)))
+	
+	}
+	models_with_single_covariates_data_df = as.data.frame(models_with_single_covariates_data)
+	
+	# write to text file:
+	ratio_label_for_filename = str_replace_all(ratio_label, ' ', '_')
+	output_file = paste0(comparison_dir, '/models_with_single_covariates_data.', ratio_label_for_filename, '.txt')
+	write.table(models_with_single_covariates_data_df, file = output_file, sep = "\t", quote = FALSE, col.names = TRUE, row.names = FALSE)
+	
+	regression_results = list(model_coeff_without_covariates = ratio_coeff_without_covariates, 
+							  model_p_val_without_covariates = ratio_p_val_without_covariates, 
+							  all_model_coeffs_with_covariates_have_same_sign = all_ratio_coeffs_have_same_sign, 
+							  least_significant_model_p_val_with_covariates = least_significant_ratio_p_val)
+							  
+	return(regression_results)
+																			   
+}
+
+###################################################################################################################################################################
+
+test_relation_between_single_ratio_and_continuous_variable <- function(studied_cells, cluster_frac_ratios_to_test, ratio_label, label_for_fig_title, 
+																	   min_num_cells_for_ratio_calculation, cont_var_vals, cont_var_label, cont_var_label_for_filename, 
+																	   include_moving_window_stats, window_size, include_trend_line, include_num_samples_in_title, 
+																	   check_effect_of_covariates, clinical_meta_data, covariates_to_consider_for_test, 
+																	   x_ticks, y_ticks, output_dir) {
+
+	comparison_dir = paste0(output_dir, '/', cont_var_label_for_filename, '/min_num_cells_', min_num_cells_for_ratio_calculation, '/')
+	if (!file.exists(comparison_dir)) {
+		dir.create(comparison_dir, recursive = TRUE)
+	}
+
+	relation_details = list(ratio = c(), var = c(), test_stat = c(), p_val = c(), 
+							model_coeff_without_covariates = c(), model_p_val_without_covariates = c(), 
+							all_model_coeffs_with_covariates_have_same_sign = c(), least_significant_model_p_val_with_covariates = c())
+
+	# Get the details of the ratio: 
+	ratio_info = get_info_of_cluster_frac_ratio(cluster_frac_ratios_to_test, ratio_label)
+	
+	# Calculate the ratio per sample:
+	ratio_per_sample = calculate_cluster_frac_ratio_per_sample(ratio_info, studied_cells, min_num_cells_for_ratio_calculation, ratio_label, output_dir)
+
+	# Identify the samples for which we have both the ratio and the given variable:
+	samples_with_vals_ind = which( !is.na(cont_var_vals) )
+	samples_with_vals = names(cont_var_vals)[samples_with_vals_ind]
+	samples_to_include = intersect(samples_with_vals, names(ratio_per_sample))
+	
+	cont_var_vals_to_use = cont_var_vals[samples_to_include]
+	ratio_per_sample_to_use = ratio_per_sample[samples_to_include]
+
+	# First, calcualte the correlation between the variables and generate a relevant figure:
+	corr_test_results <- calc_correlation_between_single_ratio_and_continuous_variable(ratio_per_sample_to_use, ratio_label, label_for_fig_title, 
+																					   cont_var_vals_to_use, cont_var_label, cont_var_label_for_filename, 
+																					   include_moving_window_stats, window_size, include_trend_line, include_num_samples_in_title, 
+																					   x_ticks, y_ticks, comparison_dir)
+																					   
+	relation_details$ratio = ratio_label
+	relation_details$var = cont_var_label
+	relation_details$test_stat = corr_test_results$spearman_corr
+	relation_details$p_val = corr_test_results$p_val
+	
+	# Next, to take into account differet co-variates, we'll model the continous variable as a function of the ratio plus the different co-variates:
+	if (check_effect_of_covariates) {
+	
+		regression_results <- regress_continuous_variable_as_function_of_ratio_and_covariates(ratio_per_sample_to_use, ratio_label, 
+																							  cont_var_vals_to_use, cont_var_label, cont_var_label_for_filename, 
+																							  clinical_meta_data, covariates_to_consider_for_test, 
+																							  comparison_dir)
+		relation_details$model_coeff_without_covariates = regression_results$model_coeff_without_covariates
+		relation_details$model_p_val_without_covariates = regression_results$model_p_val_without_covariates
+		relation_details$all_model_coeffs_with_covariates_have_same_sign = regression_results$all_model_coeffs_with_covariates_have_same_sign
+		relation_details$least_significant_model_p_val_with_covariates = regression_results$least_significant_model_p_val_with_covariates
+	}	
+	
+	return(relation_details)
+}
+
+
+###################################################################################################################################################################
+
+calc_direct_relation_between_single_ratio_and_discrete_variable <- function(ratio_per_sample_to_use, ratio_label, discrete_var_vals_to_use, discrete_var_label,  
+																			discrete_var_label_for_filename, var_vals_to_include_in_analysis, is_ordinal, 
+																			include_num_samples_in_title, comparison_dir) {
+
+	df_for_test = data.frame(discrete_var = discrete_var_vals_to_use, ratio = ratio_per_sample_to_use)
+	# Reorder values based on the specified list of values to include:
+	df_for_test$discrete_var = factor(df_for_test$discrete_var, levels = var_vals_to_include_in_analysis)
+	
+	# If there are two values for the discrete variable, we'll run a Mann-Whitney test; otherwise, we'll run a Kruskal-Wallis test 
+	# - unless the variable is ordinal, in which case we'll calculate Spearman's correlation:
+	num_levels_of_discrete_var = length(var_vals_to_include_in_analysis)
+	if (num_levels_of_discrete_var == 2) {
+	
+		test_results = wilcox.test(ratio ~ discrete_var, data = df_for_test)
+		
+		test_stat = test_results$statistic
+		p_val = test_results$p.value
+	
+		if (p_val < 0.001) {
+		
+			p_val_str = 'p-value < 0.001'
+			
+		} else {
+		
+			p_val_str = sprintf('p-value = %0.3f', p_val)
+		
+		}
+		
+		fig_title = sprintf('%s Ratio\n%s', ratio_label, p_val_str)
+	
+	} else {
+	
+		if (is_ordinal) {
+		
+			# Replace the values of the variable included in the analysis by numbers from 1 up. We assume the values in a given that represents their order:
+	
+			var_as_ordinal <- plyr::mapvalues(df_for_test$discrete_var, from = var_vals_to_include_in_analysis, 
+											  to = 1:length(unique(df_for_test$discrete_var)))
+			
+
+			test_results = cor.test(ratio_per_sample_to_use, as.numeric(var_as_ordinal), method = 'spearman')
+			test_stat = test_results$estimate
+			p_val = test_results$p.value
+		
+			if (p_val < 0.001) {
+		
+				p_val_str = 'p-value < 0.001'
+				
+			} else {
+			
+				p_val_str = sprintf('p-value = %0.3f', p_val)
+			
+			}
+			
+			fig_title = sprintf('%s Ratio\n\u03c1 = %0.3f, %s', ratio_label, test_results$estimate, p_val_str)
+				# \u03c1 = the unicode value for lowercase rho
+	
+		} else {
+			
+			test_results = kruskal.test(ratio ~ discrete_var, data = df_for_test)
+			
+			test_stat = test_results$statistic
+			p_val = test_results$p.value
+	
+			if (p_val < 0.001) {
+		
+				p_val_str = 'p-value < 0.001'
+				
+			} else {
+			
+				p_val_str = sprintf('p-value = %0.3f', p_val)
+			
+			}
+	
+			fig_title = sprintf('%s Ratio\n%s', ratio_label, p_val_str)
+		
+		}
+		
+	}
+	
+	if (include_num_samples_in_title) {
+		
+		fig_title = sprintf('%s\n(n = %d)', fig_title, length(discrete_var_vals_to_use))
+			
+	} 
+	
+	# Now, show a plot comparing the cluster frac ratio across all groups included in the test:
+	medians_df <- aggregate(. ~ discrete_var, median, data = df_for_test)
+	
+	ratio_label_for_filename = str_replace_all(ratio_label, ' ', '_')
+	
+	fig_file_name = paste0(comparison_dir, '/', discrete_var_label_for_filename, '_vs_', ratio_label_for_filename, '.for_manuscript.png')
+	png(fig_file_name, type = 'cairo')
+	p <- ggplot(df_for_test, aes(y=ratio, x=discrete_var)) + 
+	     geom_jitter(size = 1, position = position_jitter(width = 0.1, height=0)) +
+	     geom_crossbar(data = medians_df, aes(ymin = ratio, ymax = ratio), size = 0.5, col = "black", width = 0.5) +
+		 theme_classic() +
+	     labs(x = discrete_var_label, y = 'Cluster Fraction Ratio', title = fig_title) + 											
+		 theme(axis.title.x = element_text(face="bold", size=20), axis.title.y = element_text(face="bold", size=20), 
+		       axis.text.x = element_text(face="bold", size = 16), axis.text.y = element_text(face="bold", size = 16), 
+		       plot.title = element_text(face="bold", size=20, hjust = 0.5), 
+			   legend.position = "none")
+	print(p)
+	dev.off()
+
+
+	test_results = list(test_stat = test_stat, p_val = p_val)
+	return(test_results)
+
+
+}
+
+###################################################################################################################################################################
+
+test_relation_between_single_ratio_and_discrete_variable <- function(studied_cells, cluster_frac_ratios_to_test, ratio_label, min_num_cells_for_ratio_calculation, 
+																	 discrete_var_vals_per_sample, discrete_var_label,  
+																     discrete_var_label_for_filename, var_vals_to_include_in_analysis, is_ordinal, 
+																     include_num_samples_in_title, output_dir) {
+	
+	comparison_dir = paste0(output_dir, '/', discrete_var_label_for_filename, '/min_num_cells_', min_num_cells_for_ratio_calculation, '/')
+	if (!file.exists(comparison_dir)) {
+		dir.create(comparison_dir, recursive = TRUE)
+	}	
+	
+	relation_details = list(ratio = c(), var = c(), test_stat = c(), p_val = c())
+
+	# Get the details of the ratio: 
+	ratio_info = get_info_of_cluster_frac_ratio(cluster_frac_ratios_to_test, ratio_label)
+	
+	# Calculate the ratio per sample:
+	ratio_per_sample = calculate_cluster_frac_ratio_per_sample(ratio_info, studied_cells, min_num_cells_for_ratio_calculation, ratio_label, output_dir)
+
+	# Identify the samples matching the values to include:
+	samples_to_include_ind = which(discrete_var_vals_per_sample %in% var_vals_to_include_in_analysis)
+	samples_to_include = names(discrete_var_vals_per_sample)[samples_to_include_ind]
+	samples_to_include = intersect(samples_to_include, names(ratio_per_sample))
+	
+	discrete_var_vals_to_use = discrete_var_vals_per_sample[samples_to_include]
+	ratio_per_sample_to_use = ratio_per_sample[samples_to_include]
+
+	# Calculate the direct relation between the ratio and the variable, without any covariates:
+	test_results = calc_direct_relation_between_single_ratio_and_discrete_variable(ratio_per_sample_to_use, ratio_label, discrete_var_vals_to_use, discrete_var_label,  
+																				   discrete_var_label_for_filename, var_vals_to_include_in_analysis, is_ordinal, 
+																				   include_num_samples_in_title, comparison_dir) 
+	
+	relation_details$ratio = ratio_label
+	relation_details$var = discrete_var_label
+	relation_details$test_stat = test_results$test_stat
+	relation_details$p_val = test_results$p_val
+	
+	return(relation_details)
+}
+
+###################################################################################################################################################################
+
+
+output_dir = paste0(base_output_dir, '/', ISN_class_to_include, '/')
+if (!file.exists(output_dir)) {
+	dir.create(output_dir, recursive = TRUE)
+}
+
+studied_cells = readRDS(all_immune_cells_obj)
+
+cluster_frac_ratios_to_test = populate_list_of_cluster_frac_ratios_to_test()
+
+clinical_meta_data = read.table(clinical_metadata_file, sep = "\t", header = TRUE, row.names = 1, as.is = TRUE)
+
+# keep only the samples of LN patients:
+cells_of_LN_patients_ind = which(studied_cells@meta.data$Type == 'LN')
+LN_samples = unique(studied_cells@meta.data$Sample[cells_of_LN_patients_ind])
+clinical_meta_data = clinical_meta_data[LN_samples, ]
+
+# keep only the relevant ISN classes: 
+if (ISN_class_to_include == 'Proliferative+Mixed') {
+
+	proliferative_mixed_samples_ind = which(clinical_meta_data$General_ISN_Class %in% c('Proliferative', 'Mixed'))
+	clinical_meta_data = clinical_meta_data[proliferative_mixed_samples_ind, ]
+	
+	covariates_to_consider = setdiff(covariates_to_consider, 'ISN') 
+
+} else if (ISN_class_to_include == 'Membranous') {
+
+	membranous_samples_ind = which(clinical_meta_data$General_ISN_Class == 'Membranous')
+	clinical_meta_data = clinical_meta_data[membranous_samples_ind, ]
+
+	covariates_to_consider = setdiff(covariates_to_consider, 'ISN') 
+}
+
+
+observed_relations_over_all_vars = NULL
+
+
+######### Check correlation between Chronicity and the fraction of CTLs out of all CD8 T cells:
+ratio_label = 'CTLs out of CD8 T Cells'
+label_for_fig_title = 'CTLs Fraction out of CD8 T Cells'
+cont_var_label = 'Chronicity'
+cont_var_label_for_filename = 'chronicity'
+cont_var_vals = clinical_meta_data[, 'Chronicity']
+names(cont_var_vals) = rownames(clinical_meta_data)
+covariates_to_consider_for_test = covariates_to_consider 
+if ( (ISN_class_to_include == 'Proliferative+Mixed') || (ISN_class_to_include == 'all') ) {
+
+	x_ticks = c(0, 3, 6, 9)
+	y_ticks = c(0, 0.25, 0.5, 0.75)
+	
+} else {
+
+
+	x_ticks = c(0, 3, 6, 9)
+	y_ticks = c(0, 0.25, 0.5)
+	
+
+}
+
+relation_details <- test_relation_between_single_ratio_and_continuous_variable(studied_cells, cluster_frac_ratios_to_test, ratio_label, label_for_fig_title,  
+																			   min_num_cells_for_ratio_calculation, 
+																			   cont_var_vals, cont_var_label, cont_var_label_for_filename, FALSE, -1, TRUE, TRUE, 
+																			   TRUE, clinical_meta_data, covariates_to_consider_for_test, x_ticks, y_ticks, 
+																			   output_dir)
+																			   
+
+
+######### Check correlation between Activity and the fraction of CTLs out of all CD8 T cells:
+ratio_label = 'CTLs out of CD8 T Cells'
+label_for_fig_title = 'CTLs Fraction out of CD8 T Cells'
+cont_var_label = 'Activity'
+cont_var_label_for_filename = 'activity'
+cont_var_vals = clinical_meta_data[, 'Activity']
+names(cont_var_vals) = rownames(clinical_meta_data)
+covariates_to_consider_for_test = covariates_to_consider 
+if ( (ISN_class_to_include == 'Proliferative+Mixed') || (ISN_class_to_include == 'all') ) {
+
+	x_ticks = c(0, 5, 10, 15)
+	y_ticks = c(0, 0.25, 0.5, 0.75)
+	
+} else {
+
+	x_ticks = c(0, 1, 2)
+	y_ticks = c(0, 0.25, 0.5)
+
+}
+relation_details <- test_relation_between_single_ratio_and_continuous_variable(studied_cells, cluster_frac_ratios_to_test, ratio_label, label_for_fig_title,  
+																			   min_num_cells_for_ratio_calculation, 
+																			   cont_var_vals, cont_var_label, cont_var_label_for_filename, FALSE, -1, TRUE, TRUE, 
+																			   TRUE, clinical_meta_data, covariates_to_consider_for_test, x_ticks, y_ticks, 
+																			   output_dir)
+													
+######### Check the correlation between the response to treatment and the fraction of CTLs out of all CD8 T cells:
+ratio_label = 'CTLs out of CD8 T Cells'
+discrete_var_label = 'Treatment Response'
+discrete_var_label_for_filename = 'treatment_response'
+var_vals_to_include_in_analysis = c('NR', 'PR', 'CR')  # with partial responders
+relation_details <- test_relation_between_single_ratio_and_discrete_variable(studied_cells, cluster_frac_ratios_to_test, ratio_label, min_num_cells_for_ratio_calculation, 
+																			 discrete_var_vals_per_sample, discrete_var_label,  
+																			 discrete_var_label_for_filename, var_vals_to_include_in_analysis, FALSE, TRUE, output_dir)
+												
+observed_relations_over_all_vars <- rbind(observed_relations_over_all_vars, relation_details)
+
+
+######### Check the correlation between the ISN class and the fraction of CTLs out of all CD8 T cells (only if analyzing both proliferative/mixed and membranous together):
+if (ISN_class_to_include == 'all') {
+
+	ratio_label = 'CTLs out of CD8 T Cells'
+	discrete_var_vals_per_sample = clinical_meta_data[, 'ISN']
+	names(discrete_var_vals_per_sample) = rownames(clinical_meta_data)
+	# relabel the ISN class, to allow grouping classes together:
+	discrete_var_vals_per_sample <- plyr::mapvalues(discrete_var_vals_per_sample, 
+													from = c('[III]', '[III][IV]',  '[III][V]', '[IV]', '[IV][V]', '[V]'), 
+													to = c('Proliferative/\nMixed', 'Proliferative/\nMixed', 'Proliferative/\nMixed', 'Proliferative/\nMixed', 
+														   'Proliferative/\nMixed', 'Membranous'))
+	discrete_var_label = 'ISN class'
+	discrete_var_label_for_filename = 'ISN_class'
+	var_vals_to_include_in_analysis = c('Proliferative/\nMixed', 'Membranous')
+	covariates_to_consider_for_test = setdiff(covariates_to_consider, 'ISN')  # no point in including the ISN class as a covariate in this case
+	relation_details <- test_relation_between_single_ratio_and_discrete_variable(studied_cells, cluster_frac_ratios_to_test, ratio_label, min_num_cells_for_ratio_calculation, 
+																				 discrete_var_vals_per_sample, discrete_var_label,  
+																				 discrete_var_label_for_filename, var_vals_to_include_in_analysis, FALSE, TRUE, output_dir)
+
+}
+
+													
+######### Calculate the overall q-value, and write to a text file:
+overall_q_val = p.adjust(observed_relations_over_all_vars$p_val, method = 'BH')
+observed_relations_over_all_vars$overall_q_val = overall_q_val
+
+output_file = paste0(output_dir, '/observed_relations_over_all_vars.txt')
+write.table(observed_relations_over_all_vars, file = output_file, sep = "\t", quote = FALSE, col.names = TRUE, row.names = FALSE)
+
+
