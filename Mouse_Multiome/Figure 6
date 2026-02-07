@@ -1,0 +1,83 @@
+library(Seurat)
+options(Seurat.object.assay.version = 'v5')
+library(Signac)
+library(ggplot2)
+library(ggraph)
+library(cowplot)
+library(patchwork)
+library(dplyr)
+library(tidyverse)
+library(EnsDb.Mmusculus.v79)
+library(BSgenome.Mmusculus.UCSC.mm10)
+library(TFBSTools)
+library(scSHC)
+library(stringr)
+library(scriabin)
+library(pbapply)
+library(scriabin)
+library(ComplexHeatmap)
+library(cowplot)
+library(flashClust)
+library(ade4)
+library(glmGamPoi)
+library(CelliD)
+
+##Figure 6F####
+#require objects from 'per tissue data preprocessing.R'
+#add back CD4 T and CD8 T subset annotations to kidney T cell data
+Kidney.CD4$celltype <- "CD4"
+Kidney.CD4$toCombine <- str_c(Kidney.CD4$celltype, '_', Kidney.CD4$major_celltype)
+Kidney.CD8$celltype <- "CD8"
+Kidney.CD8$toCombine <- str_c(Kidney.CD8$celltype, '_', Kidney.CD8$major_celltype)
+
+CD8.cell_annotation <- as.data.frame(Kidney.CD8$toCombine)
+CD8.cell_annotation$celltype <- CD8.cell_annotation$`Kidney.CD8$toCombine`
+CD8.cell_annotation$`Kidney.CD8$toCombine` <- NULL
+CD4.cell_annotation <- as.data.frame(Kidney.CD4$toCombine)
+CD4.cell_annotation$celltype <- CD4.cell_annotation$`Kidney.CD4$toCombine`
+CD4.cell_annotation$`Kidney.CD4$toCombine` <- NULL
+
+T_cell_annotation <- rbind(CD4.cell_annotation, CD8.cell_annotation)
+T_cell_annotation$BC <- rownames(T_cell_annotation)
+
+Kidney$major_celltype <- ifelse(colnames(Kidney) %in% rownames(T_cell_annotation), 
+                                    as.character(T_cell_annotation$celltype)[
+                                      match(colnames(Kidney), rownames(T_cell_annotation))],FALSE)
+
+Idents(Kidney) <- "major_celltype"
+Kidney <- subset(Kidney, idents =  c("FALSE"), invert = T)
+DimPlot(Kidney, reduction = "umap.wnn", group.by = "major_celltype", label = TRUE, label.size = 3)
+
+##Figure 6G####
+#require objects from 'build cell cell communications.R'
+#identify significant Il21=Il21r LR pair IP from Kidney.all.ip_sig, in my case it is IP-1210
+poi = "IP-1210"
+moi <- reshape2::melt(Kidney.ip_sig %>% dplyr::filter(name==poi) %>%
+                        select("lr_pair",contains("connectivity"))) %>% arrange(-value)
+moi$lr_pair <- factor(moi$lr_pair, levels = unique(moi$lr_pair))
+
+IPFeaturePlot1(Kidney.all, ip = poi)
+ggplot(moi, aes(x = lr_pair, y = value, color = variable)) + 
+  geom_point() + theme_cowplot() + ggpubr::rotate_x_text() + labs(x = NULL, y = "Intramodular\nconnectivity")
+
+
+##Figure 6H####
+#require objects from 'per tissue data preprocessing.R'
+FeaturePlot(Kidney.all, features = c("Il15ra"), reduction = "umap.wnn")
+
+##Figure 6J####
+#require objects from 'build cell cell communications.R'
+receiver_cells <- colnames(Kidney)[Kidney$major_celltype=="CD8-Stem-like II"]
+PlotLigandTargetAlluvium(Kidney, signature_matrix = gene_signature,
+                         active_ligands = active_ligands, receiver_cells = receiver_cells,
+                         ligands_of_interest = c("Il21", "Il15")) + ggtitle("CD8-Stem-like II")
+
+receiver_cells <- colnames(Kidney)[Kidney$major_celltype=="CD8-Cytotoxic I"]
+PlotLigandTargetAlluvium(Kidney, signature_matrix = gene_signature,
+                         active_ligands = active_ligands, receiver_cells = receiver_cells,
+                         ligands_of_interest = c("Il21", "Il15")) + ggtitle("CD8-Cytotoxic I")
+
+receiver_cells <- colnames(Kidney)[Kidney$major_celltype=="CD8-Terminally differentiated"]
+PlotLigandTargetAlluvium(Kidney, signature_matrix = gene_signature,
+                         active_ligands = active_ligands, receiver_cells = receiver_cells,
+                         ligands_of_interest = c("Il21", "Il15")) + ggtitle("CD8-Terminally differentiated")
