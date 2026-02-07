@@ -1,0 +1,38 @@
+library(Seurat)library(slingshot)library(ggplot2)library(scales)library(viridis)library(reshape)
+
+#Figure S7A
+
+
+#Figure S7B - Stem-like to Th1/cytotoxic trajectory
+data_S_human_T_NK <- readRDS("~/Desktop/AMP2 dataset analysis/all_cells.post_clustering.T+NK.rds")DimPlot(data_S_human_T_NK, group.by = "seurat_clusters", label = T)
+
+path <- c(8,0,12,22)data_S <- subset(data_S_human_T_NK, seurat_clusters %in% path)DefaultAssay(data_S) <- "RNA"data_S <- FindVariableFeatures(data_S)dims <- 1:2data_S <- FindNeighbors(data_S,reduction = "umap", dims = dims)data_S$sub_cluster <- data_S$seurat_clustersdata_S <- GeneTrajectory::RunDM(data_S, K = 5)data_S$Pseudotime<- data_S@reductions$dm@cell.embeddings[,1]data_S_all <- data_S_human_T_NKdata_S_all$Pseudotime <- NAdata_S_all$Pseudotime[colnames(data_S)] <- rank(-data_S$Pseudotime)FeaturePlot(data_S_all, features = "Pseudotime", order = T) & scale_color_viridis() & ggtitle(sprintf("PATH: %s", paste(path, collapse = "-")))
+
+cor_pt <- function(x){  cor(x, pt, method = "spearman")}pt <- data_S$Pseudotimecor.res <- sort(apply(data_S[["RNA"]]@data[data_S[["RNA"]]@var.features,], 1, cor_pt), decreasing = T)head(cor.res)tail(cor.res)cor.df <- data.frame(gene = names(cor.res),                     cor = cor.res)
+genes <- c(names(head(cor.res)), names(tail(cor.res))) genes <- c("TCF7", "IL7R", "CCR7", "TBX21", "CXCR6", "EOMES", "NKG7", "GZMA", "GZMB", "BHLHE40")
+
+#Figure S7C - Stem-like to Tfh/Tph trajectory
+data_S_human_T_NK <- readRDS("~/Desktop/AMP2 dataset analysis/all_cells.post_clustering.T+NK.rds")DimPlot(data_S_human_T_NK, group.by = "seurat_clusters", label = T)### Specify the path of clusters through which you want to define a trajectorypath <- c(8,7,14)data_S <- subset(data_S_human_T_NK, seurat_clusters %in% path)DefaultAssay(data_S) <- "RNA"data_S <- FindVariableFeatures(data_S)dims <- 1:2data_S <- FindNeighbors(data_S,reduction = "umap", dims = dims)data_S$sub_cluster <- data_S$seurat_clustersdata_S <- GeneTrajectory::RunDM(data_S, K = 5)data_S$Pseudotime<- data_S@reductions$dm@cell.embeddings[,1]data_S_all <- data_S_human_T_NKdata_S_all$Pseudotime <- NAdata_S_all$Pseudotime[colnames(data_S)] <- rank(-data_S$Pseudotime)FeaturePlot(data_S_all, features = "Pseudotime", order = T) & scale_color_viridis() & ggtitle(sprintf("PATH: %s", paste(path, collapse = "-")))cor_pt <- function(x){  cor(x, pt, method = "spearman")}pt <- data_S$Pseudotimecor.res <- sort(apply(data_S[["RNA"]]@data[data_S[["RNA"]]@var.features,], 1, cor_pt), decreasing = T)head(cor.res)tail(cor.res)cor.df <- data.frame(gene = names(cor.res),                     cor = cor.res)
+
+genes <- c(names(head(cor.res)), names(tail(cor.res))) genes <- c("TCF7", "IL7R", "CCR7", "BCL6", "CXCR5", "MAF", "ICOS", "CD200", "PDCD1", "IL21")
+
+
+#Figure S7D - Stem-like to Treg trajectory
+data_S_human_T_NK <- readRDS("~/Desktop/AMP2 dataset analysis/all_cells.post_clustering.T+NK.rds")DimPlot(data_S_human_T_NK, group.by = "seurat_clusters", label = T)
+
+path <- c(8,7,10)data_S <- subset(data_S_human_T_NK, seurat_clusters %in% path)DefaultAssay(data_S) <- "RNA"data_S <- FindVariableFeatures(data_S)dims <- 1:2data_S <- FindNeighbors(data_S,reduction = "umap", dims = dims)data_S$sub_cluster <- data_S$seurat_clustersdata_S <- GeneTrajectory::RunDM(data_S, K = 5)data_S$Pseudotime<- data_S@reductions$dm@cell.embeddings[,1]data_S_all <- data_S_human_T_NKdata_S_all$Pseudotime <- NAdata_S_all$Pseudotime[colnames(data_S)] <- rank(-data_S$Pseudotime)FeaturePlot(data_S_all, features = "Pseudotime", order = T) & scale_color_viridis() & ggtitle(sprintf("PATH: %s", paste(path, collapse = "-")))
+
+cor_pt <- function(x){  cor(x, pt, method = "spearman")}pt <- data_S$Pseudotimecor.res <- sort(apply(data_S[["RNA"]]@data[data_S[["RNA"]]@var.features,], 1, cor_pt), decreasing = T)head(cor.res)tail(cor.res)cor.df <- data.frame(gene = names(cor.res),                     cor = cor.res)
+
+genes <- c(names(head(cor.res)), names(tail(cor.res))) genes <- c("TCF7", "IL7R", "CCR7", "FOXP3", "IL10", "IKFZ2", "IKFZ3", "LAG3", "TIGIT", "ENTPD1")
+
+#Figure S7E - Stem-like to Th17 trajectory
+path <- c(8,3,9)data_S <- subset(data_S_human_T_NK, seurat_clusters %in% path)DefaultAssay(data_S) <- "RNA"data_S <- FindVariableFeatures(data_S)dims <- 1:2data_S <- FindNeighbors(data_S,reduction = "umap", dims = dims)data_S$sub_cluster <- data_S$seurat_clustersdata_S <- GeneTrajectory::RunDM(data_S, K = 5)data_S$Pseudotime<- data_S@reductions$dm@cell.embeddings[,1]data_S_all <- data_S_human_T_NKdata_S_all$Pseudotime <- NAdata_S_all$Pseudotime[colnames(data_S)] <- rank(-data_S$Pseudotime)FeaturePlot(data_S_all, features = "Pseudotime", order = T) & scale_color_viridis() & ggtitle(sprintf("PATH: %s", paste(path, collapse = "-")))cor_pt <- function(x){  cor(x, pt, method = "spearman")}pt <- data_S$Pseudotimecor.res <- sort(apply(data_S[["RNA"]]@data[data_S[["RNA"]]@var.features,], 1, cor_pt), decreasing = T)head(cor.res)tail(cor.res)cor.df <- data.frame(gene = names(cor.res),                     cor = cor.res)
+
+
+genes <- c(names(head(cor.res)), names(tail(cor.res))) genes <- c("TCF7", "IL7R", "CCR7", "FOXP3", "RORC", "RORA", "IL17A", "IL17F")
+
+Figure S7F
+Figure S7G
+Figure S7H
+Figure S7I
